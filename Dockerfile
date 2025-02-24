@@ -8,7 +8,7 @@ RUN go mod download && CGO_ENABLED=0 go build -a -o restarter main.go
 
 FROM alpine:3.21.3
 
-COPY --from=gob /build/restarter /api
+COPY --from=gob /build/restarter /restarter
 VOLUME [ "/config" ]
 
 ENTRYPOINT [ "/restarter" ]
