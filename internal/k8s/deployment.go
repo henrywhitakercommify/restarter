@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/henrywhitakercommify/restarter/internal/metrics"
+	"github.com/prometheus/client_golang/prometheus"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -64,6 +66,9 @@ func (d *Deployment) Ready(ctx context.Context) (float64, error) {
 		}
 	}
 
+	metrics.TotalPods.With(d.Labels()).Set(float64(total))
+	metrics.ReadyPods.With(d.Labels()).Set(float64(totalReady))
+
 	return (float64(totalReady) / float64(total)) * 100, nil
 }
 
@@ -83,4 +88,7 @@ func (d *Deployment) Restart(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+func (d Deployment) Labels() prometheus.Labels {
+	return prometheus.Labels{"namespace": d.namespace, "name": d.name}
 }

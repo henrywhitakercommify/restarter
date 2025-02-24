@@ -6,6 +6,7 @@ import (
 
 	"github.com/henrywhitakercommify/restarter/internal/k8s"
 	"github.com/henrywhitakercommify/restarter/internal/log"
+	"github.com/henrywhitakercommify/restarter/internal/metrics"
 	"github.com/spf13/cobra"
 )
 
@@ -17,6 +18,8 @@ var (
 	interval    time.Duration
 	dryRun      bool
 
+	metricsPort int
+
 	logLevel string
 )
 
@@ -26,6 +29,9 @@ func NewRoot() *cobra.Command {
 		Short: "Restart a kubernetes deployment when it is unhealthy",
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			log.Setup(log.Level(logLevel))
+			server := metrics.Server(metricsPort)
+			log.Info("serving metrics", "port", metricsPort)
+			go server.ListenAndServe()
 		},
 		RunE: runRestarter,
 	}
@@ -41,6 +47,9 @@ func NewRoot() *cobra.Command {
 		DurationVarP(&interval, "interval", "i", time.Second*5, "The interval the ready status is evaluated at")
 	cmd.Flags().
 		BoolVar(&dryRun, "dry-run", false, "When enabled, the client will not restart the deployment, just log it")
+
+	cmd.PersistentFlags().
+		IntVar(&metricsPort, "metrics-port", 8766, "The port the metrics server listens on")
 	cmd.PersistentFlags().
 		StringVar(&logLevel, "log-level", "info", "The log level, accepted values: info, error, debug")
 
@@ -54,10 +63,11 @@ func runRestarter(cmd *cobra.Command, args []string) error {
 	}
 
 	dep := k8s.NewDeployment(client, namespace, deployment)
-
 	if _, err := dep.Get(cmd.Context()); err != nil {
 		return fmt.Errorf("deployment %s does not exist: %w", deployment, err)
 	}
+
+	labels := dep.Labels()
 
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
@@ -66,16 +76,22 @@ func runRestarter(cmd *cobra.Command, args []string) error {
 		case <-cmd.Context().Done():
 			return nil
 		case <-tick.C:
+			metrics.TotalChecks.With(labels).Inc()
 			ready, err := dep.Ready(cmd.Context())
 			if err != nil {
 				log.Error("could not get ready status of deployment", "error", err)
 			}
 			log.Info("got deployment ready status", "ready", fmt.Sprintf("%f%%", ready))
-			if !dryRun && ready < restartWhen {
-				log.Info("deployment ready status is less than threshold, resting deployment")
-				if err := dep.Restart(cmd.Context()); err != nil {
-					log.Error("failed to restart deployment", "error", err)
-					continue
+			if ready < restartWhen {
+				metrics.TotalRestarts.With(labels).Inc()
+				if !dryRun {
+					log.Info("deployment ready status is less than threshold, resting deployment")
+					if err := dep.Restart(cmd.Context()); err != nil {
+						log.Error("failed to restart deployment", "error", err)
+						continue
+					}
+				} else {
+					log.Info("deployment ready status is less than threshold but dry run is on, doing nothing")
 				}
 			}
 		}
