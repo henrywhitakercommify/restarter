@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/henrywhitakercommify/restarter/internal/k8s"
@@ -11,12 +13,13 @@ import (
 )
 
 var (
-	kubeConfig  string
-	namespace   string
-	deployment  string
-	restartWhen float64
-	interval    time.Duration
-	dryRun      bool
+	kubeConfig   string
+	namespace    string
+	deployment   string
+	restartWhen  float64
+	restartAfter time.Duration
+	interval     time.Duration
+	dryRun       bool
 
 	metricsPort int
 
@@ -44,9 +47,11 @@ func NewRoot() *cobra.Command {
 	cmd.Flags().
 		Float64VarP(&restartWhen, "restart-when", "k", 100, "The deployment will be rollout restarted when this percentage of pods are unready")
 	cmd.Flags().
-		DurationVarP(&interval, "interval", "i", time.Second*5, "The interval the ready status is evaluated at")
+		DurationVarP(&interval, "interval", "i", time.Second*30, "The interval the ready status is evaluated at")
 	cmd.Flags().
 		BoolVar(&dryRun, "dry-run", false, "When enabled, the client will not restart the deployment, just log it")
+	cmd.Flags().
+		DurationVar(&restartAfter, "restart-after", time.Minute, "A time interval that the program waits for before checking again and restarting")
 
 	cmd.PersistentFlags().
 		IntVar(&metricsPort, "metrics-port", 8766, "The port the metrics server listens on")
@@ -67,8 +72,6 @@ func runRestarter(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("deployment %s does not exist: %w", deployment, err)
 	}
 
-	labels := dep.Labels()
-
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
 	for {
@@ -76,24 +79,63 @@ func runRestarter(cmd *cobra.Command, args []string) error {
 		case <-cmd.Context().Done():
 			return nil
 		case <-tick.C:
-			metrics.TotalChecks.With(labels).Inc()
-			ready, err := dep.Ready(cmd.Context())
-			if err != nil {
-				log.Error("could not get ready status of deployment", "error", err)
+			if restarting.Load() {
+				log.Info("already checking deployment health, skipping")
+				continue
 			}
-			log.Info("got deployment ready status", "ready", fmt.Sprintf("%f%%", ready))
-			if ready < restartWhen {
-				metrics.TotalRestarts.With(labels).Inc()
-				if !dryRun {
-					log.Info("deployment ready status is less than threshold, resting deployment")
-					if err := dep.Restart(cmd.Context()); err != nil {
-						log.Error("failed to restart deployment", "error", err)
-						continue
-					}
-				} else {
-					log.Info("deployment ready status is less than threshold but dry run is on, doing nothing")
-				}
-			}
+			go checkDeployment(cmd.Context(), dep)
 		}
+	}
+}
+
+var (
+	restarting = &atomic.Bool{}
+)
+
+func checkDeployment(ctx context.Context, dep *k8s.Deployment) {
+	restarting.Store(true)
+	defer restarting.Store(false)
+
+	labels := dep.Labels()
+
+	metrics.TotalChecks.With(labels).Inc()
+	ready, err := dep.Ready(ctx)
+	if err != nil {
+		log.Error("could not get ready status of deployment", "error", err)
+	}
+	log.Info("got deployment ready status", "ready", fmt.Sprintf("%f%%", ready))
+	if ready >= restartWhen {
+		log.Info("deployment is healthy")
+		return
+	}
+
+	metrics.TotalRestarts.With(labels).Inc()
+
+	log.Info(
+		"deployment ready status is less than threshold, waiting",
+		"duration",
+		restartAfter.String(),
+	)
+
+	time.Sleep(restartAfter)
+
+	if dryRun {
+		log.Info("deployment ready status is less than threshold but dry run is on, doing nothing")
+		return
+	}
+
+	ready, err = dep.Ready(ctx)
+	if err != nil {
+		log.Error("could not get ready status of deployment", "error", err)
+		return
+	}
+
+	if restartWhen < ready {
+		log.Info("deployment is healthy again, skipping restart")
+		return
+	}
+
+	if err := dep.Restart(ctx); err != nil {
+		log.Error("failed to restart deployment", "error", err)
 	}
 }
