@@ -35,7 +35,7 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           args:
             - --namespace={{ .Values.config.namespace }}
-            - --name={{ .Values.config.deployment }}
+            - --deployment={{ .Values.config.deployment }}
             - --restart-when={{ .Values.config.restart_when }}
             - --restart-after={{ .Values.config.restart_after }}
             - --dry-run={{ .Values.config.dry_run }}
