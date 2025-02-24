@@ -11,4 +11,4 @@ restarter --namespace default --name bongo --interval 1m --restart-when 75 --res
 
 Running this will watch the deployment `bongo` in the `default` namespace.
 It will check the percentage of pods that are "ready" every minute and
-trigger a restart if more than 75% of them are not ready for 5 consecutive minutes.
+trigger a restart if more than 25% of them are not ready for 5 consecutive minutes.
