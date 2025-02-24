@@ -90,5 +90,5 @@ func (d *Deployment) Restart(ctx context.Context) error {
 	return nil
 }
 func (d Deployment) Labels() prometheus.Labels {
-	return prometheus.Labels{"namespace": d.namespace, "name": d.name}
+	return prometheus.Labels{"namespace": d.namespace, "deployment": d.name}
 }

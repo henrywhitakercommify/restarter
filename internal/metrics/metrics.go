@@ -13,25 +13,25 @@ var (
 		prometheus.GaugeOpts{
 			Name: "restarter_running_pods",
 		},
-		[]string{"namespace", "name"},
+		[]string{"namespace", "deployment"},
 	)
 	ReadyPods = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "restarter_ready_pods",
 		},
-		[]string{"namespace", "name"},
+		[]string{"namespace", "deployment"},
 	)
 	TotalRestarts = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "restarter_restarts_total",
 		},
-		[]string{"namespace", "name"},
+		[]string{"namespace", "deployment"},
 	)
 	TotalChecks = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "restarter_checks_total",
 		},
-		[]string{"namespace", "name"},
+		[]string{"namespace", "deployment"},
 	)
 )
 
