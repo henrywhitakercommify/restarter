@@ -102,6 +102,7 @@ func checkDeployment(ctx context.Context, dep *k8s.Deployment) {
 	ready, err := dep.Ready(ctx)
 	if err != nil {
 		log.Error("could not get ready status of deployment", "error", err)
+		return
 	}
 	log.Info("got deployment ready status", "ready", fmt.Sprintf("%f%%", ready))
 	if ready >= restartWhen {
